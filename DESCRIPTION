@@ -1,11 +1,29 @@
 Package: causalDR
-Title: What the Package Does (One Line, Title Case)
+Title: Doubly Robust Estimation of Causal Effect under Covariate Dependent Censoring
 Version: 0.0.0.9000
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Jiyue", "Qin", , "j5qin@ucsd.edu", role = c("aut", "cre"))
+Description: Methods for causal estimation under covariate-dependent censoring in semi-competing risks data, where individuals may experience a non-terminal and a terminal event. The package provides augmented inverse probability weighting estimators that jointly adjust for censoring and treatment assignment to estimate treatment-specific risks of (i) the non-terminal event, (ii) the terminal event without a prior non-terminal event, and (iii) the terminal event following a non-terminal event.
+License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
+Imports:
+    dplyr,
+    tibble,
+    tidyr,
+    purrr,
+    stringr,
+    ggplot2,
+    ggsci,
+    survival,
+    randomForestSRC,
+    ranger,
+    polspline,
+    gbm,
+    Rcpp,
+    future,
+    future.apply,
+    parallel
+LinkingTo:
+    Rcpp
