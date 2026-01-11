@@ -1,8 +1,4 @@
 
-sourceCpp("get_integral.cpp")
-
-
-
 ####################################################################################
 #  Function get_CIF - get CIF from S_t and Lambda
 #  return: a vector with length: number of time points of interest
@@ -612,7 +608,6 @@ get_CI = function(est, se_results, CI_raw = T, alpha = 0.05){
 #' (iii) an event-time model. The function supports parametric/semi-parametric models
 #' (e.g., logistic regression, Cox PH) and machine-learning models (e.g., random forests, GBM,
 #' random survival forests, splines), with optional cross-fitting and bootstrap inference.
-#'
 #' The input data are assumed to contain two observed time variables:
 #' \itemize{
 #'   \item \code{X1}: observed time for the non-terminal event (e.g., illness),
@@ -694,7 +689,7 @@ get_CI = function(est, se_results, CI_raw = T, alpha = 0.05){
 #'
 #' @param boot_raw Logical; if \code{TRUE}, returns raw bootstrap replicates instead of summarized SE/CI.
 #'
-#' @param alpha Significance level for confidence intervals (e.g., \code{0.05} yields 95\% CIs).
+#' @param alpha Significance level for confidence intervals (e.g., \code{0.05} yields 95 percent CIs).
 #'
 #' @param seed Optional integer random seed for reproducibility.
 #'
@@ -735,10 +730,10 @@ get_CI = function(est, se_results, CI_raw = T, alpha = 0.05){
 #'
 #' @examples
 #' \dontrun{
-#' # Simulate some data
+#' ## Simulate some data
 #' dat = sim_data(n=200)
-#' # Estimate CIF1, CIF2 and CIF3 at a user-specified grid of times with
-#' default nuisance models without SEs
+#' ## Estimate all three CIFs at a user-specified grid of times
+#' ## Use default nuisance models, and do not compute SEs
 #' fit <- causalAIPCW(
 #'   data = dat,
 #'   covars = c("Z1", "Z2"),
@@ -749,14 +744,14 @@ get_CI = function(est, se_results, CI_raw = T, alpha = 0.05){
 #' )
 #' fit$est
 #'
-#' # Include terminal risk (reported as CIF3) and add IPW for comparison
+#' ## Estimate CIF1 and CIF2, bootstrap for SEs and add IPW for comparison
 #'fit2 <- causalAIPCW(
 #'  data = dat,
 #'  covars = c("Z1", "Z2"),
 #'  estimand = c('CIF1', 'CIF2'),
 #'  time_interest = seq(0.5, 5, by = 0.5),
 #'  add_IPW = TRUE,
-#'  n_boot = 10
+#'  n_boot = 200
 #')
 #' }
 #'

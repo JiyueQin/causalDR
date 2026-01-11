@@ -70,8 +70,7 @@
 #'
 #' Produces publication-ready plots of time-varying causal estimands (e.g., cumulative
 #' incidence functions or cumulative hazards) from a fitted object returned by
-#' \code{causalAIPCW()}. This is a user-facing wrapper around the internal
-#' \code{.plot_estimates()} function.
+#' \code{causalAIPCW()}.
 #'
 #' The function supports plotting point estimates alone or point estimates with
 #' pointwise confidence intervals, and automatically facets plots by estimand.
@@ -108,7 +107,7 @@
 #'
 #' @return A \pkg{ggplot2} object.
 #'
-#' @seealso \code{\link{causalAIPCW}}, \code{\link{sim_data}}, \code{\link{.plot_estimates}}
+#' @seealso \code{\link{causalAIPCW}}, \code{\link{sim_data}}
 #'
 #' @examples
 #' \dontrun{
@@ -124,7 +123,7 @@
 #' )
 #'
 #' ## Plot CIFs with confidence intervals
-#' plot_estimates(fit, estimand = "all_CIF", CI = TRUE)
+#' plot_estimates(fit, estimand = "all_CIF", CI = TRUE)}
 #' @export
 
 plot_estimates = function(fit, estimand = 'all_CIF', CI = T,
