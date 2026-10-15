@@ -3,7 +3,7 @@
 #' @importFrom dplyr `%>%`
 #' @importFrom dplyr mutate select filter rename rename_at mutate_at arrange
 #' @importFrom dplyr case_when vars
-#' @importFrom dplyr all_of starts_with contains
+#' @importFrom dplyr all_of any_of starts_with contains
 #' @importFrom dplyr bind_rows
 #' @importFrom dplyr lag group_by summarize left_join right_join
 #'

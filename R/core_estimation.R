@@ -806,10 +806,11 @@ causalAIPCW = function(data, X1='X1',
   # the max of time_interest needs to be <tau<max(X2)
   if (!is.null(tau)){
     if(tau<max(data$X2)) {
+      # reset indicators before truncating times, so events beyond tau become censored at tau
       data = data %>%
-        mutate_at(vars(X1, X2), ~ifelse(. >tau, tau, .)) %>%
         mutate(delta1 = ifelse(X1>tau, 0, delta1),
-               delta2 = ifelse(X2>tau, 0, delta2))
+               delta2 = ifelse(X2>tau, 0, delta2)) %>%
+        mutate_at(vars(X1, X2), ~ifelse(. >tau, tau, .))
 
     }
   }
@@ -994,7 +995,7 @@ causalAIPCW = function(data, X1='X1',
   # rename estimand names to be consistent with the paper
   est = est %>% select(-contains('_trans')) %>%
     rename_at(vars(contains('risk')), ~str_replace(., 'risk', 'CIF3')) %>%
-    select(contains('CIF'))
+    select(any_of(c('method', 'time')), contains('CIF'))
   if (!is.null(est_se)) est_se = est_se %>%
     mutate(estimand = str_replace(estimand, 'risk', 'CIF3')) %>%
     filter(str_detect(estimand, 'CIF'))
