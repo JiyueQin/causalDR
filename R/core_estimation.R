@@ -555,7 +555,7 @@ get_se = function(boot_results) {
                  values_to = 'est',
                  names_prefix = 'est_') %>%
     group_by(method, time, estimand) %>%
-    summarise(se = sd(est, na.rm = T), .groups = 'drop')
+    summarize(se = sd(est, na.rm = T), .groups = 'drop')
 
 }
 
@@ -850,13 +850,14 @@ causalAIPCW = function(data, X1='X1',
   if (n_boot > 0) {
     if (parallel) {
       if (is.null(n_cores)) {n_cores = parallel::detectCores()}
+      old_plan <- future::plan()
+      on.exit(future::plan(old_plan), add = TRUE)
       future::plan("multisession", workers = n_cores)
       boot_results = future.apply::future_lapply(seq_len(n_boot), function(i) {
-        sourceCpp("get_integral.cpp")
         boot_index = sample(1:n, n, replace = T)
         boot_data = data[boot_index, ]
         boot_weights = NULL
-        fit_boot = causalAIPCW_est(
+        fit_boot = causalDR:::causalAIPCW_est(
           boot_data,
           n,
           time_all,
@@ -883,7 +884,7 @@ causalAIPCW = function(data, X1='X1',
           add_contrast
         )
         cbind(boot_id = i, fit_boot$est)
-      }, future.seed=T) %>% bind_rows()
+      }, future.seed=T, future.packages = c("causalDR")) %>% bind_rows()
     }
     else{
       boot_results = vector('list', n_boot)
@@ -991,13 +992,15 @@ causalAIPCW = function(data, X1='X1',
   }
 
   # rename estimand names to be consistent with the paper
-  est = est %>% select(-contains('_trans')) %>% rename_at(vars(contains('risk')), ~str_replace(., 'risk', 'CIF3'))
+  est = est %>% select(-contains('_trans')) %>%
+    rename_at(vars(contains('risk')), ~str_replace(., 'risk', 'CIF3')) %>%
+    select(contains('CIF'))
   if (!is.null(est_se)) est_se = est_se %>%
-    mutate(estimand = str_replace(estimand, 'risk', 'CIF3'))
+    mutate(estimand = str_replace(estimand, 'risk', 'CIF3')) %>%
+    filter(str_detect(estimand, 'CIF'))
 
   list(est = est,
        est_se = est_se,
-       nuisance = fit$nuisance,
        runtime = fit$runtime,
        call = as.call(full_call)
   )

@@ -128,7 +128,7 @@
 
 plot_estimates = function(fit, estimand = 'all_CIF', CI = T,
                           xlab='Time',
-                          ylab = 'Value',
+                          ylab = 'Estimate',
                           time_cut=NULL, title=NULL,
                           point_size = 1, pointrange_size=0.1){
   .plot_estimates(fit=fit, estimand = estimand, CI = CI,
