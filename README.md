@@ -158,6 +158,29 @@ plot_estimates(fit2)
 
 <img src="man/figures/README-unnamed-chunk-8-1.png" width="100%" />
 
+## Left truncation
+
+`causalAIPWtrunc()` extends the method to semi-competing risks data with covariate-dependent left truncation and right censoring, where a subject is observed only if the truncation time `Q` is smaller than the first event time, and the censoring time is `Q` plus a residual censoring time that may depend on treatment. The two sets of nuisance models are
+
+- `time_model`: models for the transition rates of the non-terminal and terminal events (`"Cox"` or `"pCox"`, a ridge-penalized Cox model with spline terms),
+
+- `trunc_model` and `PS_model`: models for the truncation time (`"Cox"` or `"pCox"` on the reversed time scale) and the propensity score (`"logit"` or `"gbm"`); the residual censoring distribution is estimated by Kaplan-Meier within each treatment group.
+
+```r
+sim = sim_data_trunc(n = 500)
+fit3 = causalAIPWtrunc(data = sim$dat, covars = c("Z1", "Z2"),
+                       time_interest = c(2, 3, 4), time1_interest = 1.5,
+                       add_IPW = TRUE, add_naive_est = TRUE, n_boot = 0)
+fit3$est
+```
+
+In simulations, the full data estimator, computed from the potential outcomes of all subjects before truncation and censoring, provides an (unattainable) benchmark:
+
+```r
+full_data_est_trunc(sim$dat_full, time_interest = c(2, 3, 4),
+                    time1_interest = 1.5, name = "full data")
+```
+
 ## Citation
 
 To appear.

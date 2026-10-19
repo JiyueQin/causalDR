@@ -178,7 +178,7 @@ transform_est = function(est, epsilon = 1e-6){
   }
   # transform estimates so that their values are not restricted for CI
   log_log_vars = est %>%
-    select(matches('CIF[12]_[01]'), matches('risk_[01]')) %>% names
+    select(matches('CIF[123]_[01]'), matches('risk_[01]')) %>% names
 
   log_vars = est %>%
     select(contains('ratio')) %>% names()
@@ -586,12 +586,12 @@ get_CI = function(est, se_results, CI_raw = T, alpha = 0.05){
 
   out %>%
     mutate(lower = case_when(
-      str_detect(estimand, 'CIF[12]_[01]')|str_detect(estimand, 'risk_[01]') ~
+      str_detect(estimand, 'CIF[123]_[01]')|str_detect(estimand, 'risk_[01]') ~
         exp(-exp(upper_trans)),
       str_detect(estimand, 'ratio') ~ exp(lower_trans),
       .default = lower),
       upper = case_when(
-        str_detect(estimand, 'CIF[12]_[01]')|str_detect(estimand, 'risk_[01]') ~
+        str_detect(estimand, 'CIF[123]_[01]')|str_detect(estimand, 'risk_[01]') ~
           exp(-exp(lower_trans)),
         str_detect(estimand, 'ratio') ~ exp(upper_trans),
         .default = upper)) %>%

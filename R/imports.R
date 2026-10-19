@@ -9,7 +9,7 @@
 #'
 #' @importFrom tidyr pivot_longer fill
 #'
-#' @importFrom purrr map map2 map_dbl map_df
+#' @importFrom purrr map map2 map_dbl map_df map_lgl
 #'
 #' @importFrom tibble tibble
 #'

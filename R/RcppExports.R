@@ -2,6 +2,10 @@
 # Generator token: 10BE3573-1514-4C36-9D1C-5A225CD40393
 
 get_integral_cpp <- function(t, X, Y) {
-    .Call('_causalDR_get_integral_cpp', PACKAGE = 'causalDR', t, X, Y)
+    .Call(`_causalDR_get_integral_cpp`, t, X, Y)
+}
+
+trunc_aug_cpp <- function(S, dL1, lp3, B3, dB3, G, dG, iQ, iX1, need_m, k_target, S_min, G_min) {
+    .Call(`_causalDR_trunc_aug_cpp`, S, dL1, lp3, B3, dB3, G, dG, iQ, iX1, need_m, k_target, S_min, G_min)
 }
 

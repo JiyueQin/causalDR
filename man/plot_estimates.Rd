@@ -9,7 +9,7 @@ plot_estimates(
   estimand = "all_CIF",
   CI = T,
   xlab = "Time",
-  ylab = "Value",
+  ylab = "Estimate",
   time_cut = NULL,
   title = NULL,
   point_size = 1,

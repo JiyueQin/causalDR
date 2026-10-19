@@ -1,0 +1,304 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsthm, bbm}
+\usepackage{natbib}
+\usepackage{hyperref}
+
+\newtheorem{proposition}{Proposition}
+\newcommand{\indep}{\perp\!\!\!\perp}
+\newcommand{\Qmin}{Q_{\min}}
+\newcommand{\Qmax}{Q_{\max}}
+
+\title{Generating covariate-dependent left truncation times\\
+under reverse-time proportional hazards}
+\date{}
+
+\begin{document}
+\maketitle
+
+This note explains how the left truncation time $Q$ is generated in the simulations of
+\texttt{causalDR} (\texttt{sim\_data\_trunc()}) and of \texttt{truncAC} (the function
+\texttt{gen()} in \texttt{src/gen2.R}, used for the ATE simulation of
+\citealt{wang2025liberatingframeworktruncationcensoring}, hereafter Wang et al.). Both
+are special cases of one construction, indexed by a baseline distribution function $G_0$
+supported on an interval $[\Qmin, \Qmax]$. We explain why the construction yields a
+proportional hazards model on the reversed time scale, what $\Qmin$ and $\Qmax$ control,
+and how they interact with positivity and with the estimation of the truncation
+distribution.
+
+Throughout, $X = (A, Z^\top)^\top$ denotes the treatment and the covariates, $T$ is the
+event time subject to left truncation (for semi-competing risks $T = \min(T_1, T_2)$), and
+a subject is observed only if $Q < T$. Let $G(q \mid x) = P(Q \le q \mid X = x)$ denote the
+conditional distribution function of $Q$ in the population before truncation, and let
+$\eta^\top x$ be a linear predictor, possibly including an intercept $\eta_0$.
+
+\section{Reverse-time hazards and the reverse proportional\texorpdfstring{\\}{} hazards model}
+
+The reverse time hazard of $Q$ given $X = x$ is
+\begin{equation*}
+\bar\lambda(q \mid x) = \lim_{h \to 0^+}
+\frac{P(q - h < Q \le q \mid Q \le q, X = x)}{h}
+= \frac{g(q \mid x)}{G(q \mid x)},
+\end{equation*}
+where $g$ is the density of $Q$, and the reverse cumulative hazard is
+$\bar H(q \mid x) = \int_q^\infty \bar\lambda(s \mid x)\,ds$. For continuous $G$, since
+$\bar\lambda(s \mid x)\,ds = d\log G(s \mid x)$ and $G(\infty \mid x) = 1$, we have
+$\bar H(q \mid x) = -\log G(q \mid x)$, i.e., $G(q \mid x) = \exp\{-\bar H(q \mid x)\}$,
+which mirrors the relation $S = \exp(-H)$ in forward time. The reverse proportional
+hazards model assumes $\bar\lambda(q \mid x) = \bar\lambda_0(q)\exp(\eta^\top x)$, which is
+equivalent to $\bar H(q \mid x) = \bar H_0(q)\exp(\eta^\top x)$, and hence to
+\begin{equation}\label{eq:reversePH}
+G(q \mid x) = G_0(q)^{\exp(\eta^\top x)}, \qquad G_0(q) = \exp\{-\bar H_0(q)\},
+\end{equation}
+where $G_0$ is a baseline distribution function. Model \eqref{eq:reversePH} is the
+definition of reverse proportional hazards that we use below; it remains meaningful when
+$G_0$ has an atom.
+
+The reverse proportional hazards model is a Cox model in forward time after reversing the
+time axis. For any constant $\tau$ at or above the upper end of the support of $Q$, let
+$W = \tau - Q$. Then $P(W > w \mid x) = P(Q < \tau - w \mid x)$, and the hazard of $W$ at
+$w$ equals the reverse time hazard of $Q$ at $\tau - w$. Therefore $W$ given $X$ follows a
+Cox model with baseline hazard $\bar\lambda_0(\tau - w)$ and regression coefficient $\eta$,
+and this holds for every choice of $\tau$; the constant $\tau$ only fixes the origin of
+the reversed time scale. Moreover, in the observed data $Q$ is right truncated by $T$, so
+$W$ is left truncated by $\tau - T$: a subject is at risk at $w$ if
+$\tau - T < w \le \tau - Q$, i.e., $Q \le \tau - w < T$, which is the risk set of the
+backwards martingale $\bar M_Q$. This is why both packages estimate $G$ by fitting a Cox
+model to the data $(\tau - T, \tau - Q]$, with $T$ replaced by $X_1$ among the subjects
+with $T$ observed, and inverse probability of censoring weights.
+
+\section{A general inverse distribution function construction}
+
+Let $G_0$ be any distribution function supported on $[\Qmin, \Qmax]$, and let
+$G_0^{-1}(v) = \inf\{q : G_0(q) \ge v\}$ be its generalized inverse, so that
+$G_0^{-1}(v) \le q$ if and only if $v \le G_0(q)$.
+
+\begin{proposition}\label{prop:construction}
+Let $U \sim \mathrm{Uniform}(0, 1)$ be independent of $X$ and of the potential event times,
+let $V = U^{\exp(-\eta^\top X)}$, and let $Q = G_0^{-1}(V)$. Then $Q$ given $X$ follows the
+reverse proportional hazards model \eqref{eq:reversePH}, and $Q$ is independent of the
+potential event times given $X$.
+\end{proposition}
+
+\begin{proof}
+For $q \in [\Qmin, \Qmax]$,
+\begin{equation*}
+P(Q \le q \mid X = x) = P\{V \le G_0(q) \mid X = x\}
+= P\{U \le G_0(q)^{\exp(\eta^\top x)}\} = G_0(q)^{\exp(\eta^\top x)},
+\end{equation*}
+where the second equality raises both sides of $U^{\exp(-\eta^\top x)} \le G_0(q)$ to the
+power $\exp(\eta^\top x) > 0$. Conditional independence holds because $Q$ is a function of
+$X$ and of $U$, and $U$ is generated independently of everything else.
+\end{proof}
+
+In words, $V = G(Q \mid X)$ is the conditional probability integral transform of $Q$: we
+first draw $G(Q \mid X)$, which is uniform, and then invert $G(\cdot \mid X)$. This is the
+line \texttt{G0\_Q = runif(N)\^{}exp(-lp)} in \texttt{sim\_data\_trunc()}. The conditional
+independence of $Q$ and the event times given $X$ is the conditional independent
+truncation assumption.
+
+Two remarks on $\eta$. First, in the Cox model for $W = \tau - Q$ an intercept $\eta_0$ is
+not identifiable, since $G_0^{\exp(\eta_0 + \eta_1^\top x)} = \{G_0^{\exp(\eta_0)}\}^{
+\exp(\eta_1^\top x)}$ and $G_0^{\exp(\eta_0)}$ is another baseline distribution function;
+in the simulation, however, $\eta_0$ changes the distribution of $Q$ and is a convenient
+way to tune the truncation rate. Second, a larger $\eta^\top x$ makes the exponent
+$\exp(-\eta^\top x)$ of $U$ smaller, so $V$ is closer to 1 and $Q$ is stochastically larger;
+subjects with a larger linear predictor are therefore more likely to be truncated.
+
+\section{The uniform baseline used by Wang et al.}
+
+Wang et al.\ take the baseline to be the uniform distribution on $[\Qmin, \Qmax]$,
+\begin{equation*}
+G_0(q) = \frac{q - \Qmin}{\Qmax - \Qmin}, \qquad \Qmin \le q \le \Qmax,
+\end{equation*}
+so that by Proposition \ref{prop:construction}
+\begin{equation}\label{eq:uniform}
+Q = \Qmin + (\Qmax - \Qmin)\,U^{\exp(-\eta^\top X)}, \qquad
+G(q \mid x) = \left\{\frac{q - \Qmin}{\Qmax - \Qmin}\right\}^{\exp(\eta^\top x)}.
+\end{equation}
+Their code generates $Q$ through the reversed time $Q_2 = \tau - Q$ instead:
+\begin{equation*}
+Q_2 = Q_{2,\min} + (Q_{2,\max} - Q_{2,\min})\{1 - U^{\exp(-\eta^\top X)}\},
+\qquad Q = \tau - Q_2,
+\end{equation*}
+with $Q_{2,\max} = \tau - \Qmin$ and $Q_{2,\min} = \tau - \Qmax$. Substituting these
+expressions gives $Q = \Qmax - (\Qmax - \Qmin)\{1 - U^{\exp(-\eta^\top X)}\}$, which is
+\eqref{eq:uniform}. Hence $\tau$ cancels and plays no role in the distribution of $Q$.
+The description ``$\tau - Q$ follows a proportional hazards model with the baseline hazard
+of a uniform distribution'' follows from Section 1: when $\eta^\top x = 0$, $W = \tau - Q$
+is uniform on $[\tau - \Qmax, \tau - \Qmin]$, whose hazard is
+$\lambda_0(w) = 1/(\tau - \Qmin - w)$, and the hazard of $W$ given $X = x$ is
+$\lambda_0(w)\exp(\eta^\top x)$.
+
+The parameters $\Qmin$ and $\Qmax$ are the lower and upper ends of the support of $Q$:
+$G(q \mid x) = 0$ for $q < \Qmin$ and $G(q \mid x) = 1$ for $q \ge \Qmax$, for every $x$.
+They allow the truncation window to be moved, e.g., $\Qmin > 0$ when all subjects enter the
+study late, or narrowed, e.g., $\Qmax$ small relative to the range of $T$ for light
+truncation. Since $E(U^c) = 1/(1 + c)$ for $c > 0$,
+\begin{equation*}
+E(Q \mid X = x) = \Qmin + \frac{\Qmax - \Qmin}{1 + \exp(-\eta^\top x)}.
+\end{equation*}
+In the ATE simulation of Wang et al., $\Qmin = 0$, $\Qmax = \tau = 5$, and
+$\eta^\top x = -0.6 + 0.6a + 0.4z_1 + 0.2z_2$, so that, e.g.,
+$E(Q \mid A = 0, Z = 0) = 5/\{1 + \exp(0.6)\} = 1.77$ and $E(Q \mid A = 1, Z = 0) = 2.5$.
+With the uniform baseline $Q$ is continuous, and there is no probability mass at $\Qmin$.
+
+\section{A baseline with a point mass at the lower end}
+
+The function \texttt{sim\_data\_trunc()} in \texttt{causalDR} uses the baseline
+\begin{equation*}
+G_0(q) = p_0 + (1 - p_0)\frac{q - \Qmin}{\Qmax - \Qmin}, \qquad \Qmin \le q \le \Qmax,
+\end{equation*}
+with $\Qmin = 0$ and $\Qmax$ given by the argument \texttt{q\_max}. The generalized inverse
+is $G_0^{-1}(v) = \Qmin$ for $v \le p_0$ and
+$G_0^{-1}(v) = \Qmin + (\Qmax - \Qmin)(v - p_0)/(1 - p_0)$ for $v > p_0$, so that, by
+Proposition \ref{prop:construction}, $Q$ follows the reverse proportional hazards model
+with
+\begin{equation*}
+P(Q = \Qmin \mid X = x) = G(\Qmin \mid x) = p_0^{\exp(\eta^\top x)}.
+\end{equation*}
+The uniform baseline of Wang et al.\ is the special case $p_0 = 0$. The point mass
+represents subjects who are followed from the time origin, i.e., incident rather than
+prevalent subjects; such subjects are never truncated, since $\Qmin < T$.
+
+Other familiar constructions can be checked in the same way. If
+$W \sim \mathrm{Exp}\{\lambda\exp(\eta^\top x)\}$ given $X = x$ and
+$Q = \max(\tau - W, 0)$, then for $0 \le q \le \tau$
+\begin{equation*}
+G(q \mid x) = P(W \ge \tau - q \mid x) = \exp\{-\lambda e^{\eta^\top x}(\tau - q)\}
+= G_0(q)^{\exp(\eta^\top x)}, \qquad G_0(q) = \exp\{-\lambda(\tau - q)\},
+\end{equation*}
+which is again of the form \eqref{eq:reversePH}, with a point mass
+$\exp\{-\lambda\tau e^{\eta^\top x}\}$ at 0. In contrast, generating $W$ from the same
+exponential distribution conditional on $W \le \tau$, or generating $Q$ itself from an
+exponential distribution with rate $\exp(\eta^\top x)$, does not give a reverse
+proportional hazards model, because
+$-\log G(q \mid x)$ is then not of the form $\bar H_0(q)\exp(\eta^\top x)$; these
+constructions can be used to misspecify the model for $G$.
+
+A baseline $G_0$ without an atom at $\Qmin$ requires $G_0(\Qmin) = 0$, i.e., the reverse
+cumulative hazard $\bar H_0$ must diverge at $\Qmin$, so that $W = \tau - Q$ has a bounded
+support ending at $\tau - \Qmin$ with a hazard that diverges there. The uniform baseline
+has this property, whereas the exponential construction above, whose support is
+unbounded before capping, cannot avoid the atom.
+
+\section{Forward-time proportional hazards for the event times}
+
+The same idea generates event times from a proportional hazards model in forward time,
+\begin{equation}\label{eq:forwardPH}
+S(t \mid x) = P(T > t \mid X = x) = S_0(t)^{\exp(\eta^\top x)}, \qquad
+H(t \mid x) = H_0(t)\exp(\eta^\top x),
+\end{equation}
+where $S_0 = \exp(-H_0)$ is a baseline survival function, with the survival function in
+place of the distribution function. Let $S_0^{-1}(v) = \inf\{t : S_0(t) \le v\}$ be the
+generalized inverse of $S_0$, so that, since $S_0$ is non-increasing and right-continuous,
+$S_0^{-1}(v) \le t$ if and only if $S_0(t) \le v$.
+
+\begin{proposition}\label{prop:forward}
+Let $U \sim \mathrm{Uniform}(0, 1)$ be independent of $X$, and let
+$T = S_0^{-1}\{U^{\exp(-\eta^\top X)}\}$. Then $T$ given $X$ follows the proportional
+hazards model \eqref{eq:forwardPH}.
+\end{proposition}
+
+\begin{proof}
+For $t \ge 0$,
+\begin{equation*}
+P(T \le t \mid X = x) = P\{U^{\exp(-\eta^\top x)} \ge S_0(t)\}
+= P\{U \ge S_0(t)^{\exp(\eta^\top x)}\} = 1 - S_0(t)^{\exp(\eta^\top x)},
+\end{equation*}
+so that $S(t \mid x) = S_0(t)^{\exp(\eta^\top x)}$.
+\end{proof}
+
+In words, we first draw $S(T \mid X)$, which is uniform, and then invert
+$S(\cdot \mid X)$. Since $E = -\log U$ follows the standard exponential distribution, the
+construction can equivalently be written as $T = H_0^{-1}\{E\exp(-\eta^\top X)\}$, i.e., the
+cumulative hazard $H(T \mid X)$ is standard exponential, which is the method of
+\citet{bender2005generating} for simulating Cox models. For example, the exponential
+baseline $H_0(t) = \lambda t$ gives $T = -\log(U)\exp(-\eta^\top X)/\lambda$, the Weibull
+baseline $H_0(t) = \lambda t^\nu$ gives
+$T = \{-\log(U)\exp(-\eta^\top X)/\lambda\}^{1/\nu}$, and the uniform baseline
+$S_0(t) = 1 - t/\tau$ on $[0, \tau]$ gives $T = \tau\{1 - U^{\exp(-\eta^\top X)}\}$. In
+contrast to the reverse-time construction, a larger $\eta^\top x$ now makes
+$U^{\exp(-\eta^\top x)}$ closer to 1 and hence $T$ stochastically smaller, since a larger
+hazard leads to earlier events. A location shift $T_{\min} + S_0^{-1}\{U^{\exp(-\eta^\top X)}\}$
+keeps the proportional hazards structure, with all hazards equal to zero on
+$[0, T_{\min})$.
+
+The two constructions are mirror images of each other. By Section 1, $Q$ follows the
+reverse proportional hazards model \eqref{eq:reversePH} if and only if $W = \tau - Q$
+follows the forward model \eqref{eq:forwardPH} with the baseline survival function
+$S_0(w) = G_0\{(\tau - w)-\}$, and for the uniform baseline the forward draw
+$W = \tau\{1 - U^{\exp(-\eta^\top X)}\}$ is exactly the reversed-time draw
+$Q_2 = \tau - Q$ in the code of Wang et al.\ with $\Qmin = 0$ and $\Qmax = \tau$. In the
+semi-competing risks generator of \texttt{sim\_data\_trunc()}, the latent event time
+$T_{\min} + \Lambda_0^{a,-1}\{-\log(U_1)/2\}$ is of this form with $H_0 = \Lambda_0^a$ and the
+constant multiplier $\exp(\eta^\top x) = 2$; the covariates enter only through their
+correlation with the latent $(U_1, U_2)$, which is why the Cox models for the transition
+rates given $(A, Z)$ are misspecified in that design.
+
+\section{Positivity and the choice of \texorpdfstring{$\Qmin$}{Q\_min} and \texorpdfstring{$\Qmax$}{Q\_max}}
+
+The estimators weight the observed subjects by $1/G(T \mid A, Z)$, so $G(T \mid A, Z)$ must
+be bounded away from zero; Wang et al.\ assume that $T \ge \tau_1$ and $Q < \tau_2$ almost
+surely, $G(\tau_1 \mid A, Z) \ge \epsilon$ and $1 - F(\tau_2 \mid A, Z) \ge \epsilon$ for
+some $\epsilon > 0$, where $F$ is the distribution function of $T$ given $(A, Z)$.
+
+The lower end $\Qmin$ must lie below the lower end of the support of $T$. Under the
+uniform baseline and $T \ge T_{\min}$,
+\begin{equation*}
+G(T \mid x) \ge G(T_{\min} \mid x)
+= \left\{\frac{T_{\min} - \Qmin}{\Qmax - \Qmin}\right\}^{\exp(\eta^\top x)},
+\end{equation*}
+which is bounded away from zero if and only if $T_{\min} > \Qmin$ and $\eta^\top x$ is
+bounded. If instead $T$ can be arbitrarily close to $\Qmin$, e.g., $T_{\min} = \Qmin = 0$,
+then $G(T \mid x) \to 0$ as $T \to \Qmin$ and the weights are unbounded. There are two ways
+to secure positivity. Wang et al.\ shift the event time, $T = 1 + \text{Weibull}$, so that
+$T_{\min} = \tau_1 = 1 > \Qmin = 0$ and $G(T \mid x) \ge 0.2^{\exp(\eta^\top x)}$. The
+point mass of Section 4 achieves the same without shifting $T$, since
+$G(T \mid x) \ge G(\Qmin \mid x) = p_0^{\exp(\eta^\top x)}$. For semi-competing risks,
+shifting $T = \min(T_1, T_2)$ amounts to shifting both $T_1$ and $T_2$ by $\tau_1$, i.e.,
+all transition hazards vanish on $[0, \tau_1)$; Cox models for the transition rates remain
+correctly specified, since their baseline hazards are simply zero on that interval.
+
+The upper end $\Qmax$ plays the role of $\tau_2$. A subject with $Q$ close to $\Qmax$ is
+observed only if $T > Q$, so $G$ is identified on its whole support only if
+$P(T > \Qmax \mid x) > 0$. The upper end also controls the amount of truncation: by the
+conditional independence of $Q$ and $T$,
+\begin{equation*}
+P(Q < T \mid X = x) = E\{G(T- \mid x) \mid X = x\},
+\end{equation*}
+which decreases as $\Qmax$ increases with $\Qmin$ fixed, because $G_0(q)$ then decreases
+for every $q$, and as $\eta^\top x$ increases. In the ATE simulation of Wang et al.\ about
+23\% of the generated subjects are truncated.
+
+\section{Implications for the estimation of \texorpdfstring{$G$}{G}}
+
+With a continuous baseline such as the uniform one there are no ties among the
+reversed-time event times $\tau - Q$, and the Cox model for $W = \tau - Q$ described in
+Section 1 is fitted without complications.
+
+With a point mass at $\Qmin$, all subjects with $Q = \Qmin$ have their reversed-time event
+at $w = \tau - \Qmin$, and the risk set at that time, $\{Q \le \Qmin < T\}$, consists of
+exactly these subjects. The true reverse time hazard at $\Qmin$ is
+$P(Q = \Qmin \mid Q \le \Qmin, X = x) = 1$ for every $x$, so the exact partial likelihood
+contribution of this tied event time is 1 and carries no information about $\eta$.
+The Breslow approximation replaces it by
+\begin{equation*}
+\frac{\prod_{i \in \mathcal{D}} \exp(\eta^\top x_i)}
+{\left\{\sum_{j \in \mathcal{D}} \exp(\eta^\top x_j)\right\}^{|\mathcal{D}|}},
+\end{equation*}
+where $\mathcal{D}$ is the set of subjects with $Q = \Qmin$, and this factor is maximized
+at $\eta = 0$ (the Efron approximation has the same dependence on $\eta$); it acts as a
+penalty that shrinks the estimate of $\eta$ towards zero and does not vanish as the sample
+size grows. The information carried by $Q = \Qmin$ is that no reversed-time event occurs
+before $w = \tau - \Qmin$, since $G(\Qmin \mid x) = \exp\{-e^{\eta^\top x}\bar H_0(\Qmin)\}$
+and $\bar H_0(\Qmin)$ only involves the reverse time hazard above $\Qmin$. The fit should
+therefore treat the subjects with $Q = \Qmin$ as censored at the end of the reversed time
+scale, i.e., use the event indicator $\mathbbm{1}(Q > \Qmin)$, and set
+$G(\Qmin- \mid x) = 0$, so that the atom $dG(\Qmin \mid x) = G(\Qmin \mid x)$ is retained
+in the integrals with respect to the backwards martingale $\bar M_Q$.
+
+\bibliographystyle{apalike}
+\bibliography{truncation_time_generation}
+
+\end{document}
