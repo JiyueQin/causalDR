@@ -24,25 +24,25 @@ BEGIN_RCPP
 END_RCPP
 }
 // trunc_aug_cpp
-List trunc_aug_cpp(NumericMatrix S, NumericMatrix dL1, NumericMatrix lp3, NumericMatrix B3, NumericMatrix dB3, NumericMatrix G, NumericMatrix dG, IntegerVector iQ, IntegerVector iX1, LogicalVector need_m, IntegerVector k_target, double S_min, double G_min);
-RcppExport SEXP _causalDR_trunc_aug_cpp(SEXP SSEXP, SEXP dL1SEXP, SEXP lp3SEXP, SEXP B3SEXP, SEXP dB3SEXP, SEXP GSEXP, SEXP dGSEXP, SEXP iQSEXP, SEXP iX1SEXP, SEXP need_mSEXP, SEXP k_targetSEXP, SEXP S_minSEXP, SEXP G_minSEXP) {
+List trunc_aug_cpp(NumericMatrix S, NumericMatrix dLambda1, NumericMatrix lp3, NumericMatrix B3, NumericMatrix dB3, NumericMatrix G, NumericMatrix dG, IntegerVector index_Q, IntegerVector index_X1, LogicalVector need_m, IntegerVector k_target, double S_min, double G_min);
+RcppExport SEXP _causalDR_trunc_aug_cpp(SEXP SSEXP, SEXP dLambda1SEXP, SEXP lp3SEXP, SEXP B3SEXP, SEXP dB3SEXP, SEXP GSEXP, SEXP dGSEXP, SEXP index_QSEXP, SEXP index_X1SEXP, SEXP need_mSEXP, SEXP k_targetSEXP, SEXP S_minSEXP, SEXP G_minSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< NumericMatrix >::type S(SSEXP);
-    Rcpp::traits::input_parameter< NumericMatrix >::type dL1(dL1SEXP);
+    Rcpp::traits::input_parameter< NumericMatrix >::type dLambda1(dLambda1SEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type lp3(lp3SEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type B3(B3SEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type dB3(dB3SEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type G(GSEXP);
     Rcpp::traits::input_parameter< NumericMatrix >::type dG(dGSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type iQ(iQSEXP);
-    Rcpp::traits::input_parameter< IntegerVector >::type iX1(iX1SEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type index_Q(index_QSEXP);
+    Rcpp::traits::input_parameter< IntegerVector >::type index_X1(index_X1SEXP);
     Rcpp::traits::input_parameter< LogicalVector >::type need_m(need_mSEXP);
     Rcpp::traits::input_parameter< IntegerVector >::type k_target(k_targetSEXP);
     Rcpp::traits::input_parameter< double >::type S_min(S_minSEXP);
     Rcpp::traits::input_parameter< double >::type G_min(G_minSEXP);
-    rcpp_result_gen = Rcpp::wrap(trunc_aug_cpp(S, dL1, lp3, B3, dB3, G, dG, iQ, iX1, need_m, k_target, S_min, G_min));
+    rcpp_result_gen = Rcpp::wrap(trunc_aug_cpp(S, dLambda1, lp3, B3, dB3, G, dG, index_Q, index_X1, need_m, k_target, S_min, G_min));
     return rcpp_result_gen;
 END_RCPP
 }

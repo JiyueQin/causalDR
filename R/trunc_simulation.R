@@ -109,11 +109,11 @@ sim_data_trunc = function(n = 500,
     stop('Q_model should be one of the following: uniform, reverse_PH')
   }
   # defaults that depend on the truncation model
-  uniform = Q_model == 'uniform'
-  if (is.null(eta)) eta = if (uniform) c(-0.6, 0.4, 0.2, 0.6) else c(0.3, -0.3, 0.3)
-  if (is.null(q_max)) q_max = if (uniform) 5 else 2
-  if (is.null(T_min)) T_min = if (uniform) 1 else 0
-  if (length(eta) != 3 + uniform) stop('eta should have length ', 3 + uniform, ' for ', Q_model)
+  is_uniform = Q_model == 'uniform'
+  if (is.null(eta)) eta = if (is_uniform) c(-0.6, 0.4, 0.2, 0.6) else c(0.3, -0.3, 0.3)
+  if (is.null(q_max)) q_max = if (is_uniform) 5 else 2
+  if (is.null(T_min)) T_min = if (is_uniform) 1 else 0
+  if (length(eta) != 3 + is_uniform) stop('eta should have length ', 3 + is_uniform, ' for ', Q_model)
   if (Q_model == 'reverse_PH' && (p0 < 0 || p0 >= 1)) stop('p0 should be in [0, 1)')
   if (q_max <= 0) stop('q_max should be positive')
   if (T_min < 0) stop('T_min should be nonnegative')
@@ -134,7 +134,7 @@ sim_data_trunc = function(n = 500,
     T1 = ifelse(A == 1, T_a[[2]]$T1, T_a[[1]]$T1)
     T2 = ifelse(A == 1, T_a[[2]]$T2, T_a[[1]]$T2)
 
-    if (uniform) {
+    if (is_uniform) {
       # G(Q | A, Z) = V with V ~ U(0, 1), where G_0(q) = q/q_max, i.e., Q = q_max V^{exp(-lp)}
       lp = eta[1] + eta[2]*Z1 + eta[3]*Z2 + eta[4]*A
       Q = q_max*runif(N)^exp(-lp)

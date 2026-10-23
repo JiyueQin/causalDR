@@ -6,7 +6,7 @@
 # Notation follows the Appendix of the paper: omega, W (for Lambda1, Lambda2) and
 # omega3, W3, V3 (for Lambda3), with the truncation augmentation terms m1-m4. The data,
 # the nuisance parameters and the naming conventions are as in trunc_nuisance.R; in
-# particular, nuis denotes the list returned by nuisance_trunc.
+# particular, nuisance denotes the list returned by nuisance_trunc.
 ################################################################################
 
 
@@ -22,10 +22,12 @@
 #' @param data Data frame, cleaned data with `n` rows.
 #' @param grid Numeric vector, the sorted unique values of `(Q, X1, X2)` in `data`,
 #'   of length `m`.
-#' @param nuis List returned by `nuisance_trunc()` for the subjects in `data`.
+#' @param nuisance List returned by `nuisance_trunc()` for the subjects in `data`.
 #' @param a Integer scalar, the treatment arm, 0 or 1.
 #' @param kmax Integer scalar in `1, ..., m`, the number of grid points at which the
-#'   jumps are computed.
+#'   jumps are computed, i.e., the grid points up to the largest time of interest;
+#'   later jumps are not needed for the estimands. The nuisance estimates are still
+#'   on the full grid, since, e.g., `G(X1)` and `C(X1)` may be needed beyond it.
 #' @param weights Nonnegative numeric vector of observation weights, one per row of
 #'   `data`.
 #' @param S_min Numeric scalar in `(0, 1)`, lower bound of `S(t | A, Z)` in
@@ -36,105 +38,168 @@
 #'   matrix of jumps (columns: `Lambda1`, `Lambda2`, `Lambda3`). A jump may be `NaN`
 #'   where its denominator is 0, e.g., beyond the last event.
 #' @noRd
-dLambda_trunc = function(data, grid, nuis, a, kmax, weights, S_min, G_min){
+dLambda_trunc = function(data, grid, nuisance, a, kmax, weights, S_min, G_min){
   n = nrow(data)
   m = length(grid)
+  # target time indices: grid[1:kmax] are the grid points up to the largest time of
+  # interest, so the estimator matrices below are n x kmax rather than n x m
   k_seq = 1:kmax
   # grid indices of the observed times
-  iQ = match(data$Q, grid)
-  iX1 = match(data$X1, grid)
-  iX2 = match(data$X2, grid)
+  index_Q = match(data$Q, grid)
+  index_X1 = match(data$X1, grid)
+  index_X2 = match(data$X2, grid)
+  # the nuisance matrices must be on the same grid as data, with one row per subject
+  if (anyNA(c(index_Q, index_X1, index_X2))) {
+    stop('grid must contain every observed Q, X1 and X2!')
+  }
+  if (!identical(dim(nuisance$G), c(n, m))) {
+    stop('The nuisance estimates do not match data and grid: expected ', n, ' x ', m,
+         ' matrices, got ', paste(dim(nuisance$G), collapse = ' x '), '!')
+  }
   # value of an n x m matrix M at a subject-specific grid index j_i for each row i
   at_index = function(M, j) M[cbind(1:n, j)]
-  # n x kmax matrix whose (i, k) entry is the grid index k
-  k_mat = matrix(k_seq, n, kmax, byrow = T)
+  # n x kmax matrix whose (i, k) entry is the grid index k; all rows are the same,
+  # and comparing it with a length-n vector such as index_Q compares subject i's
+  # index with every target time in row i
+  index_matrix = matrix(k_seq, n, kmax, byrow = T)
 
-  # S(t | a, Z) for the arm of interest, and S(t | A, Z) at the observed treatment
-  S_arm = map(1:2, ~exp(-nuis$L1[[.x]] - nuis$L2[[.x]]))
+  # S(t | a, Z) for a = 0, 1
+  S_arm = map(1:2, ~exp(-nuisance$Lambda1[[.x]] - nuisance$Lambda2[[.x]]))
+  # S(t | A, Z) at each subject's observed treatment: arm 0 values, with the rows of
+  # A = 1 replaced by arm 1 values
   S_obs = S_arm[[1]]
   S_obs[data$A == 1, ] = S_arm[[2]][data$A == 1, ]
+  # S(t | a, Z) for the arm of interest
   S_a = S_arm[[a + 1]]
-  S_obs_f = pmax(S_obs, S_min)
+  # Only quantities used as divisors are bounded below (S_min, G_min), to guard
+  # against near-violations of positivity. S_a is not bounded: here it only enters
+  # numerators as the mass S(u- | a, Z) dLambda(u | a, Z), where flooring would add
+  # bias; trunc_aug_cpp() bounds S itself where it divides by it.
+  S_obs_bounded = pmax(S_obs, S_min)   # S bounded below, for denominators
 
-  # truncation distribution at the observed treatment
-  G = pmax(nuis$G, G_min)
-  dG = nuis$G - cbind(nuis$G_first_minus, nuis$G[, -m, drop = F])
+  # truncation distribution at the observed treatment; G_bounded is bounded below
+  # for denominators, while the jumps dG use the unbounded G
+  G_bounded = pmax(nuisance$G, G_min)
+  dG = nuisance$G - cbind(0, nuisance$G[, -m, drop = F])
 
-  # C(x) = sum_{v < x} dG(v)/{S(v) G(v)^2}, and the same with the extra factor F(v)
-  integrand = dG/(S_obs_f*G^2)
+  # Building blocks of m1 and m2, with S and G at the observed treatment:
+  #   g(v)  = dG(v)/{S(v) G(v)^2}, the integrand of the truncation terms;
+  #   C(x)  = sum_{v < x} g(v) and CF(x) = sum_{v < x} F(v) g(v), F = 1 - S;
+  #   SG_Q  = S(Q) G(Q), the denominator of the boundary term at v = Q.
+  # C and CF are n x m matrices on the grid; a sum over v in [lo, hi) is then
+  # C(hi) - C(lo), so m1 and m2 need two lookups per subject instead of a loop.
+  # cbind(0, cumsum[, -m]) shifts the cumulative sums right by one column, turning
+  # sum_{v <= t_k} into the strict sum_{v < t_k} while keeping m columns.
+  integrand = dG/(S_obs_bounded*G_bounded^2)
   C = cbind(0, row_cumsum(integrand)[, -m, drop = F])
   CF = cbind(0, row_cumsum((1 - S_obs)*integrand)[, -m, drop = F])
-  SG_Q = at_index(S_obs_f, iQ)*at_index(G, iQ)
+  SG_Q = at_index(S_obs_bounded, index_Q)*at_index(G_bounded, index_Q)
 
-  # m1(Q, X1, A, Z, t) on columns 1..kmax, and m2(Q, X1, A, Z)
-  C_max = matrix(C[cbind(rep(1:n, kmax), as.vector(pmax(k_mat, iQ)))], n, kmax)
-  m1 = (iQ >= k_mat)/SG_Q - (iX1 > k_mat)*(at_index(C, iX1) - C_max)
-  m2 = (1 - at_index(S_obs, iQ))/SG_Q - (at_index(CF, iX1) - at_index(CF, iQ))
+  # m1(Q, X1, A, Z, t) = 1(Q >= t)/{S(Q) G(Q)} - sum_{v in [max(t, Q), X1)} g(v),
+  # an n x kmax matrix (it depends on t), written by the position of t relative to
+  # (Q, X1)
+  C_Q = at_index(C, index_Q)
+  C_X1 = at_index(C, index_X1)
+  m1 = ifelse(index_matrix <= index_Q, 1/SG_Q - (C_X1 - C_Q),           # t <= Q
+       ifelse(index_matrix < index_X1, -(C_X1 - C[, k_seq, drop = F]),  # Q < t < X1
+              0))                                                       # t >= X1
+  # m2(Q, X1, A, Z) = F(Q)/{S(Q) G(Q)} - sum_{v in [Q, X1)} F(v) g(v), a vector of
+  # length n (it does not depend on t)
+  m2 = (1 - at_index(S_obs, index_Q))/SG_Q -
+    (at_index(CF, index_X1) - at_index(CF, index_Q))
 
   # treatment weights 1(A = a)/pi_a(Z)
-  pi_a = if (a == 1) nuis$PS else 1 - nuis$PS
-  coef_A = (data$A == a)/pi_a
+  pi_a = if (a == 1) nuisance$PS else 1 - nuisance$PS
+  IPTW_a = (data$A == a)/pi_a
   Delta = data$Delta
-  G_X1 = at_index(G, iX1)
-  base2 = 1/G_X1 + m2
+  G_X1 = at_index(G_bounded, index_X1)
+  # the factor multiplying 1 - IPTW_a in W and W3
+  invG_plus_m2 = 1/G_X1 + m2
 
   ## Lambda1 and Lambda2
-  Y1 = (iQ < k_mat) & (iX1 >= k_mat)
-  at_X1 = iX1 == k_mat
+  Y1 = (index_Q < index_matrix) & (index_X1 >= index_matrix)
+  at_X1 = index_X1 == index_matrix
   dN1 = data$delta1*at_X1
   dN2 = (1 - data$delta1)*data$delta2*at_X1
-  omega = coef_A*Delta/(G[, k_seq, drop = F]*nuis$SD_X1)
-  W = Delta/nuis$SD_X1*(coef_A*m1 + (1 - coef_A)*base2)
+  omega = IPTW_a*Delta/(G_bounded[, k_seq, drop = F]*nuisance$S_D_X1)
+  W = Delta/nuisance$S_D_X1*(IPTW_a*m1 + (1 - IPTW_a)*invG_plus_m2)
+  # S(t- | a, Z) on the grid: cbind(1, S_a[, -m]) shifts S right by one column (S = 1
+  # before the first grid point), and [, k_seq] keeps the kmax target columns.
+  # The left limit is used because E{Y_1(t) | a, Z} = P(T >= t | a, Z) = S(t- | a, Z)
+  # and E{dN_1(t) | a, Z} = S(t- | a, Z) dLambda_1(t | a, Z). For continuous T, using
+  # S(t) instead does not matter much, but with ties it would bias it.
   S_minus = cbind(1, S_a[, -m, drop = F])[, k_seq, drop = F]
-  dL1 = row_jump(nuis$L1[[a + 1]])
-  dL2 = row_jump(nuis$L2[[a + 1]])
+  dLambda1 = row_jump(nuisance$Lambda1[[a + 1]])
+  dLambda2 = row_jump(nuisance$Lambda2[[a + 1]])
 
-  num_IPW = map(list(dN1, dN2), ~colSums(weights*omega*.x))
+  num1_IPW = colSums(weights*omega*dN1)
+  num2_IPW = colSums(weights*omega*dN2)
   den_IPW = colSums(weights*omega*Y1)
-  num_AIPW = map2(num_IPW, list(dL1, dL2),
-                  ~.x + colSums(weights*W*S_minus*.y[, k_seq, drop = F]))
+  num1_AIPW = num1_IPW + colSums(weights*W*S_minus*dLambda1[, k_seq, drop = F])
+  num2_AIPW = num2_IPW + colSums(weights*W*S_minus*dLambda2[, k_seq, drop = F])
   den_AIPW = den_IPW + colSums(weights*W*S_minus)
 
-  ## Lambda3: only time points where an event or a baseline jump occurs contribute
-  is_event3 = data$delta1*data$delta2 == 1
-  k3 = sort(unique(c(iX2[is_event3], which(colSums(nuis$dB3 > 0) > 0))))
+  ## Lambda3: dLambda3(t) is computed only at the time points k3 where its numerator
+  ## can be nonzero, the union of
+  ##   * the observed Lambda3 event times, i.e., X2 of the subjects with
+  ##     delta1 = delta2 = 1 and X1 < X2 (a terminal event after an observed
+  ##     non-terminal event), where dN3 jumps, and
+  ##   * the jump times of the baseline B3, which rho and m4 carry;
+  ## elsewhere dLambda3(t) is 0. All subjects enter the sums at k3.
+  # N3(t) = 1(T1 < T2 <= t): a tie X1 = X2 with delta1 = delta2 = 1 is a non-terminal
+  # event with no time at risk of the terminal event, so it is not a Lambda3 event
+  is_event3 = data$delta1 == 1 & data$delta2 == 1 & data$X1 < data$X2
+  # k3: integer vector of the sorted grid indices of these time points, up to kmax;
+  # it selects the Lambda3 target columns (e.g., m1[, k3]), and the jumps are filled
+  # into the length-kmax vectors below at these positions, with 0 elsewhere
+  # jumps of the baseline cumulative hazard B3 of Lambda3 on the grid
+  dB3 = row_jump(nuisance$B3)
+  k3 = sort(unique(c(index_X2[is_event3], which(colSums(dB3 > 0) > 0))))
   k3 = k3[k3 <= kmax]
-  dL3_IPW = dL3_AIPW = numeric(kmax)
+  dLambda3_IPW = dLambda3_AIPW = numeric(kmax)
 
   if (length(k3) > 0) {
     # the C++ routine uses 0-based grid indices
-    aug = trunc_aug_cpp(S = S_a, dL1 = dL1, lp3 = nuis$lp3[[a + 1]],
-                        B3 = nuis$B3, dB3 = nuis$dB3, G = nuis$G, dG = dG,
-                        iQ = iQ - 1L, iX1 = iX1 - 1L,
+    aug3 = trunc_aug_cpp(S = S_a, dLambda1 = dLambda1, lp3 = nuisance$lp3[[a + 1]],
+                        B3 = nuisance$B3, dB3 = dB3, G = nuisance$G, dG = dG,
+                        index_Q = index_Q - 1L, index_X1 = index_X1 - 1L,
                         need_m = data$A == a & Delta == 1, k_target = k3 - 1L,
                         S_min = S_min, G_min = G_min)
-    k3_mat = matrix(k3, n, length(k3), byrow = T)
-    Y3 = data$delta1*((iX1 < k3_mat) & (iX2 >= k3_mat))
-    dN3 = data$delta1*data$delta2*(iX2 == k3_mat)
-    Delta3 = Delta*(1 - (1 - data$delta2)*(iX2 <= k3_mat))
-    omega3 = coef_A/(G_X1*nuis$SD_t[, k3, drop = F])
-    SD_u = nuis$SD_u[, k3, drop = F]
-    V3 = coef_A*Delta3/SD_u
-    W3 = Delta3/SD_u*(coef_A*m1[, k3, drop = F] + (1 - coef_A)*base2)
+    # n x length(k3) matrix whose (i, l) entry is the grid index k3[l]; 
+    # all rows are the same
+    index3_matrix = matrix(k3, n, length(k3), byrow = T)
+    Y3 = data$delta1*((index_X1 < index3_matrix) & (index_X2 >= index3_matrix))
+    dN3 = is_event3*(index_X2 == index3_matrix)
+    Delta3 = Delta*(1 - (1 - data$delta2)*(index_X2 <= index3_matrix))
+    omega3 = IPTW_a/(G_X1*nuisance$S_D_t[, k3, drop = F])
+    S_D_X3tilde = nuisance$S_D_X3tilde[, k3, drop = F]
+    V3 = IPTW_a*Delta3/S_D_X3tilde
+    W3 = Delta3/S_D_X3tilde*(IPTW_a*m1[, k3, drop = F] + (1 - IPTW_a)*invG_plus_m2)
 
     num3_IPW = colSums(weights*omega3*dN3)
     den3_IPW = colSums(weights*omega3*Y3)
-    num3 = num3_IPW + colSums(weights*(W3*aug$rhod + V3*aug$m4))
-    den3 = den3_IPW + colSums(weights*(W3*aug$Rd + V3*aug$m3))
-    dL3_IPW[k3] = num3_IPW/den3_IPW
-    dL3_AIPW[k3] = num3/den3
+    num3 = num3_IPW + colSums(weights*(W3*aug3$rho_diagonal + V3*aug3$m4))
+    den3 = den3_IPW + colSums(weights*(W3*aug3$R_diagonal + V3*aug3$m3))
+    dLambda3_IPW[k3] = num3_IPW/den3_IPW
+    dLambda3_AIPW[k3] = num3/den3
   }
 
   ## naive Nelson-Aalen estimators with left-truncated risk sets
   weights_a = weights*(data$A == a)
-  Y3_all = data$delta1*((iX1 < k_mat) & (iX2 >= k_mat))
-  dN3_all = data$delta1*data$delta2*(iX2 == k_mat)
-  naive = cbind(colSums(weights_a*dN1)/colSums(weights_a*Y1),
-                colSums(weights_a*dN2)/colSums(weights_a*Y1),
-                colSums(weights_a*dN3_all)/colSums(weights_a*Y3_all))
+  Y3_all = data$delta1*((index_X1 < index_matrix) & (index_X2 >= index_matrix))
+  dN3_all = is_event3*(index_X2 == index_matrix)
+  naive = cbind(dLambda1 = colSums(weights_a*dN1)/colSums(weights_a*Y1),
+                dLambda2 = colSums(weights_a*dN2)/colSums(weights_a*Y1),
+                dLambda3 = colSums(weights_a*dN3_all)/colSums(weights_a*Y3_all))
 
-  list(AIPW = cbind(num_AIPW[[1]]/den_AIPW, num_AIPW[[2]]/den_AIPW, dL3_AIPW),
-       IPW = cbind(num_IPW[[1]]/den_IPW, num_IPW[[2]]/den_IPW, dL3_IPW),
+  # for each method, a kmax x 3 matrix of the jumps dLambda_j^a(t) at grid[1:kmax],
+  # columns j = 1, 2, 3: AIPW is the AIPW-trunc estimator (numerators and
+  # denominators with the augmentation terms), IPW drops the augmentation terms,
+  # and naive is the Nelson-Aalen estimator with left-truncated risk sets
+  list(AIPW = cbind(dLambda1 = num1_AIPW/den_AIPW, dLambda2 = num2_AIPW/den_AIPW,
+                    dLambda3 = dLambda3_AIPW),
+       IPW = cbind(dLambda1 = num1_IPW/den_IPW, dLambda2 = num2_IPW/den_IPW,
+                   dLambda3 = dLambda3_IPW),
        naive = naive)
 }
 
@@ -146,11 +211,11 @@ dLambda_trunc = function(data, grid, nuis, a, kmax, weights, S_min, G_min){
 #' `CIF_3(t | t1) = 1 - exp{Lambda_3(t1) - Lambda_3(t)}` for `t > t1` and 0
 #' otherwise. NA or negative jumps are set to 0.
 #'
-#' @param dL_ls List of length 2 over `a = 0, 1` of numeric matrices of jumps, each
+#' @param dLambda_ls List of length 2 over `a = 0, 1` of numeric matrices of jumps, each
 #'   with one row per time point in `grid_k` and 3 columns (`Lambda1`, `Lambda2`,
 #'   `Lambda3`), e.g., one method of the output of `dLambda_trunc()` for each arm.
 #' @param grid_k Numeric vector, sorted, the time points of the rows of the matrices
-#'   in `dL_ls`.
+#'   in `dLambda_ls`.
 #' @param time_interest Numeric vector of time points, sorted, at which to evaluate
 #'   the CIFs.
 #' @param time1_interest Numeric vector of non-terminal event times to condition on
@@ -161,33 +226,39 @@ dLambda_trunc = function(data, grid, nuis, a, kmax, weights, S_min, G_min){
 #'   ratios.
 #' @return A data frame as described in `assemble_CIF()`.
 #' @noRd
-CIF_from_dLambda = function(dL_ls, grid_k, time_interest, time1_interest,
+CIF_from_dLambda = function(dLambda_ls, grid_k, time_interest, time1_interest,
                             estimand, add_contrast){
   if (any(estimand == 'all')) estimand = c('CIF1', 'CIF2', 'CIF3')
   pos = findInterval(time_interest, grid_k)
-  at = function(x, p) c(0, x)[p + 1]
+  value_at = function(x, p) c(0, x)[p + 1]
 
-  arm = map(dL_ls, function(dL){
+  # arm_est: list over a = 0, 1, each a list with, on grid_k, the cumulative
+  # transition rates Lambda (a matrix with columns Lambda1, Lambda2, Lambda3) and
+  # the CIFs CIF1 and CIF2 (vectors); CIF3 is computed from Lambda[, 3] below
+  arm_est = map(dLambda_ls, function(dLambda_a){
     # negative or undefined jumps (e.g., 0/0 beyond the last event) are set to 0
-    dL[is.na(dL) | dL < 0] = 0
-    L = apply(dL, 2, cumsum)
-    if (!is.matrix(L)) L = matrix(L, nrow = 1)
-    S = exp(-L[, 1] - L[, 2])
+    dLambda_a[is.na(dLambda_a) | dLambda_a < 0] = 0
+    Lambda_a = apply(dLambda_a, 2, cumsum)
+    if (!is.matrix(Lambda_a)) Lambda_a = matrix(Lambda_a, nrow = 1)
+    S = exp(-Lambda_a[, 1] - Lambda_a[, 2])
     S_minus = c(1, S[-length(S)])
-    list(L = L,
-         CIF1 = cumsum(S_minus*dL[, 1]),
-         CIF2 = cumsum(S_minus*dL[, 2]))
+    list(Lambda = Lambda_a,
+         CIF1 = cumsum(S_minus*dLambda_a[, 1]),
+         CIF2 = cumsum(S_minus*dLambda_a[, 2]))
   })
 
-  CIF12 = map(c(CIF1 = 'CIF1', CIF2 = 'CIF2'), function(j) map(arm, ~at(.x[[j]], pos)))
+  # evaluate the step functions CIF1 and CIF2 on grid_k at time_interest:
+  # CIF1[[a + 1]] is CIF1^a(time_interest), and similarly for CIF2
+  CIF1 = map(arm_est, ~value_at(.x$CIF1, pos))
+  CIF2 = map(arm_est, ~value_at(.x$CIF2, pos))
   CIF3 = map(time1_interest, function(t1){
     pos1 = findInterval(t1, grid_k)
-    map(arm, function(x){
-      L3 = x$L[, 3]
-      ifelse(time_interest <= t1, 0, 1 - exp(at(L3, pos1) - at(L3, pos)))
+    map(arm_est, function(x){
+      Lambda3 = x$Lambda[, 3]
+      ifelse(time_interest <= t1, 0, 1 - exp(value_at(Lambda3, pos1) - value_at(Lambda3, pos)))
     })
   })
-  assemble_CIF(time_interest, estimand, add_contrast, CIF12, CIF3)
+  assemble_CIF(time_interest, estimand, add_contrast, CIF1, CIF2, CIF3)
 }
 
 
@@ -202,11 +273,13 @@ CIF_from_dLambda = function(dL_ls, grid_k, time_interest, time1_interest,
 #'   `'CIF3'`.
 #' @param add_contrast Logical scalar; if `TRUE`, also reports risk differences and
 #'   ratios.
-#' @param CIF12 Named list with elements `CIF1` and `CIF2`, each a list of length 2
-#'   over `a = 0, 1` of numeric vectors with one value per time point in
-#'   `time_interest`.
-#' @param CIF3 List with one element per time point in `time1_interest`, each a list
-#'   of length 2 over `a = 0, 1` as in `CIF12`; may be empty if `CIF3` is not
+#' @param CIF1 List of length 2 over `a = 0, 1` of numeric vectors with one value
+#'   per time point in `time_interest`, the estimates of `CIF1^a`.
+#' @param CIF2 List of length 2 over `a = 0, 1` as in `CIF1`, the estimates of
+#'   `CIF2^a`.
+#' @param CIF3 List of length `length(time1_interest)`, with one element per time
+#'   point `t1` in `time1_interest`, each a list of length 2 over `a = 0, 1` as in
+#'   `CIF1`, the estimates of `CIF3^a(t | t1)`; of length 0 if `CIF3` is not
 #'   requested.
 #' @return A data frame with one row per time point in `time_interest` and columns
 #'   `time` and `est_<name>_0`, `est_<name>_1` (and `est_<name>_diff`,
@@ -214,23 +287,29 @@ CIF_from_dLambda = function(dL_ls, grid_k, time_interest, time1_interest,
 #'   where the `CIF3` columns have the suffix `.T1.l` for the `l`-th time point in
 #'   `time1_interest` if there are several.
 #' @noRd
-assemble_CIF = function(time_interest, estimand, add_contrast, CIF12, CIF3){
+assemble_CIF = function(time_interest, estimand, add_contrast, CIF1, CIF2, CIF3){
   if (any(estimand == 'all')) estimand = c('CIF1', 'CIF2', 'CIF3')
   out = data.frame(time = time_interest)
-  add_est = function(out, name, v, suffix = ''){
-    col = function(type) paste0('est_', name, '_', type, suffix)
-    out[[col(0)]] = v[[1]]
-    out[[col(1)]] = v[[2]]
+  # add the columns est_<name>_0 and est_<name>_1 (and est_<name>_diff and
+  # est_<name>_ratio), each followed by suffix, from est_by_arm, a list over
+  # a = 0, 1 of the estimates at time_interest
+  add_est = function(out, name, est_by_arm, suffix = ''){
+    col_name = function(type) paste0('est_', name, '_', type, suffix)
+    est0 = est_by_arm[[1]]
+    est1 = est_by_arm[[2]]
+    out[[col_name(0)]] = est0
+    out[[col_name(1)]] = est1
     if (add_contrast) {
-      out[[col('diff')]] = v[[2]] - v[[1]]
-      out[[col('ratio')]] = v[[2]]/v[[1]]
+      out[[col_name('diff')]] = est1 - est0
+      out[[col_name('ratio')]] = est1/est0
     }
     out
   }
-  for (j in intersect(c('CIF1', 'CIF2'), estimand)){
-    out = add_est(out, j, CIF12[[j]])
-  }
+  if ('CIF1' %in% estimand) out = add_est(out, 'CIF1', CIF1)
+  if ('CIF2' %in% estimand) out = add_est(out, 'CIF2', CIF2)
   if ('CIF3' %in% estimand) {
+    # one set of CIF3 columns per conditioning time t1, with the suffix .T1.l for
+    # the l-th one if there are several
     for (l in seq_along(CIF3)){
       suffix = if (length(CIF3) == 1) '' else paste0('.T1.', l)
       out = add_est(out, 'CIF3', CIF3[[l]], suffix)
@@ -310,31 +389,34 @@ full_data_est_trunc = function(data, T1_0 = 'T1_0', T2_0 = 'T2_0',
   if (length(time_interest) == 0) stop('time_interest should contain positive time points!')
   time1_interest = if ('CIF3' %in% estimand) sort(time1_interest) else NULL
 
-  arm = map(list(vars[1:2], vars[3:4]), function(v){
+  arm_est = map(list(vars[1:2], vars[3:4]), function(v){
     T1 = data[[v[1]]]
     T2 = data[[v[2]]]
-    ill = is.finite(T1)
-    if (anyNA(c(T1, T2)) || any(T1[ill] > T2[ill])) {
+    has_T1 = is.finite(T1)
+    if (anyNA(c(T1, T2)) || any(T1[has_T1] > T2[has_T1])) {
       stop('Potential outcomes should be non-missing with T1 <= T2 (T1 = Inf without the non-terminal event)!')
     }
-    # Nelson-Aalen for Lambda3 with risk set T1 < u <= T2
-    is3 = ill & T2 > T1
-    ev = sort(T2[is3])
-    u = unique(ev)
-    d = tabulate(match(ev, u), nbins = length(u))
-    at_risk = findInterval(u, sort(T1[is3]), left.open = T) -
-      findInterval(u, ev, left.open = T)
-    L3 = c(0, cumsum(d/at_risk))
-    list(CIF1 = map_dbl(time_interest, ~mean(ill & T1 <= .x)),
-         CIF2 = map_dbl(time_interest, ~mean(!ill & T2 <= .x)),
-         L3 = function(x) L3[findInterval(x, u) + 1])
+    # Nelson-Aalen for Lambda3 with risk set T1 < time3 <= T2
+    in_risk3 = has_T1 & T2 > T1
+    event_T2 = sort(T2[in_risk3])
+    time3 = unique(event_T2)
+    n_event3 = tabulate(match(event_T2, time3), nbins = length(time3))
+    # #{T1 < s <= T2} = #{T1 < s} - #{T2 < s} at s = time3, as T1 < T2;
+    # left.open = T makes findInterval() count the values strictly below s
+    at_risk = findInterval(time3, sort(T1[in_risk3]), left.open = T) -
+      findInterval(time3, event_T2, left.open = T)
+    Lambda3 = c(0, cumsum(n_event3/at_risk))
+    list(CIF1 = map_dbl(time_interest, ~mean(has_T1 & T1 <= .x)),
+         CIF2 = map_dbl(time_interest, ~mean(!has_T1 & T2 <= .x)),
+         Lambda3 = function(x) Lambda3[findInterval(x, time3) + 1])
   })
 
-  CIF12 = map(c(CIF1 = 'CIF1', CIF2 = 'CIF2'), function(j) map(arm, ~.x[[j]]))
+  CIF1 = map(arm_est, ~.x$CIF1)
+  CIF2 = map(arm_est, ~.x$CIF2)
   CIF3 = map(time1_interest, function(t1){
-    map(arm, ~ifelse(time_interest <= t1, 0, 1 - exp(.x$L3(t1) - .x$L3(time_interest))))
+    map(arm_est, ~ifelse(time_interest <= t1, 0, 1 - exp(.x$Lambda3(t1) - .x$Lambda3(time_interest))))
   })
-  out = assemble_CIF(time_interest, estimand, add_contrast, CIF12, CIF3)
+  out = assemble_CIF(time_interest, estimand, add_contrast, CIF1, CIF2, CIF3)
   if (!is.null(name)) out = cbind(method = name, out)
   out
 }
@@ -343,8 +425,12 @@ full_data_est_trunc = function(data, T1_0 = 'T1_0', T2_0 = 'T2_0',
 #' Sanity checks of the cleaned data before estimation
 #'
 #' Checks that there are no missing values, that `delta1`, `delta2` and `A` are 0/1,
-#' that `0 <= Q < X1 <= X2` with `X1 = X2` when `delta1 = 0`, and that both
-#' treatment arms are observed.
+#' that `0 <= Q < X1 <= X2` with `X1 = X2` when `delta1 = 0`, and that both treatment
+#' arms are observed.
+#'
+#' Ties `X1 = X2` with `delta1 = delta2 = 1` are allowed: as `N_3(t) = 1(T1 < T2 <= t)`,
+#' such a subject has a non-terminal event at `X1` and no `Lambda_3` event (see
+#' `dLambda_trunc()`).
 #'
 #' @param data Data frame, cleaned data with columns `Q`, `X1`, `X2`, `delta1`,
 #'   `delta2`, `A` and the covariates.
@@ -387,7 +473,10 @@ check_trunc_data = function(data){
 #' @param PS_model Character scalar, `'logit'` or `'gbm'`.
 #' @param trunc_model Character scalar, `'Cox'` or `'pCox'`.
 #' @param time_model Character scalar, `'Cox'` or `'pCox'`.
-#' @param crossfit Logical scalar (`'auto'` already resolved).
+#' @param crossfit Logical scalar; if `TRUE`, the nuisance models are cross-fitted. The
+#'   option `crossfit = 'auto'` of `causalAIPWtrunc()` is converted to a logical
+#'   before this function is called: `TRUE` if any nuisance model is `'gbm'` or
+#'   `'pCox'`, and `FALSE` otherwise.
 #' @param k Integer scalar, the number of folds.
 #' @param weights Nonnegative numeric vector of observation weights, one per row of
 #'   `data`.
@@ -406,9 +495,11 @@ check_trunc_data = function(data){
 #' @return A list with
 #'   * `est`: data frame as described in `assemble_CIF()`, with the additional first
 #'     column `method` and one block of rows per method;
-#'   * `dLambda`: named list over methods of data frames with columns `time` and
-#'     `dLambda<j>_<a>`, the jumps of the cumulative transition rates on
-#'     `grid[1:kmax]`;
+#'   * `dLambda`: named list over methods (named by the method labels) of data
+#'     frames with one row per time point in `grid[1:kmax]` and columns `time` and
+#'     `dLambda<j>_<a>`, the jump of `Lambda_j^a` at `time` for `j = 1, 2, 3` and
+#'     `a = 0, 1`. The jumps are raw: they may be negative (AIPW) or `NaN` (0/0),
+#'     which `CIF_from_dLambda()` sets to 0 before computing the CIFs;
 #'   * `nuisance`: the nuisance estimates, see `nuisance_trunc()`;
 #'   * `runtime`: a `difftime` object.
 #' @noRd
@@ -424,21 +515,23 @@ causalAIPWtrunc_est = function(data, Zs, estimand, time_interest, time1_interest
   # only time points up to the largest time point of interest are needed
   kmax = max(1, findInterval(max(c(time_interest, time1_interest)), grid))
 
-  nuis = nuisance_trunc(data, grid, weights, Zs, PS_model, trunc_model, time_model,
+  nuisance = nuisance_trunc(data, grid, weights, Zs, PS_model, trunc_model, time_model,
                         crossfit, k, shuffle, PS_min, S_min, G_min, silent)
   if (!silent) message('Estimate nuisance parameters: completed in ',
-                       format(nuis$runtime))
+                       format(nuisance$runtime))
 
-  dL = map(0:1, ~dLambda_trunc(data, grid, nuis, .x, kmax, weights, S_min, G_min))
+  # list over a = 0, 1, each a list over the methods of kmax x 3 matrices of jumps
+  dLambda_by_arm = map(0:1, ~dLambda_trunc(data, grid, nuisance, .x, kmax, weights,
+                                           S_min, G_min))
   methods = c('AIPW', if (add_IPW) 'IPW', if (add_naive_est) 'naive')
   labels = c(name[1], if (add_IPW) name[2], if (add_naive_est) 'naive')
 
   est = map2(methods, labels, function(method, label){
-    dL_ls = map(dL, ~.x[[method]])
-    if (method == 'AIPW' && anyNA(unlist(dL_ls))) {
+    dLambda_ls = map(dLambda_by_arm, ~.x[[method]])
+    if (method == 'AIPW' && anyNA(unlist(dLambda_ls))) {
       warning('Method name: ', label, ', NA estimates of dLambda have occurred! Please check!')
     }
-    out = CIF_from_dLambda(dL_ls, grid[1:kmax], time_interest, time1_interest,
+    out = CIF_from_dLambda(dLambda_ls, grid[1:kmax], time_interest, time1_interest,
                            estimand, add_contrast)
     if (add_trans) out = transform_est(out)
     cbind(method = label, out)
@@ -447,13 +540,13 @@ causalAIPWtrunc_est = function(data, Zs, estimand, time_interest, time1_interest
   dLambda = map(setNames(methods, labels), function(method){
     out = data.frame(time = grid[1:kmax])
     for (a in 0:1){
-      d = dL[[a + 1]][[method]]
-      for (j in 1:3) out[[paste0('dLambda', j, '_', a)]] = d[, j]
+      dLambda_a = dLambda_by_arm[[a + 1]][[method]]
+      for (j in 1:3) out[[paste0('dLambda', j, '_', a)]] = dLambda_a[, j]
     }
     out
   })
 
-  list(est = est, dLambda = dLambda, nuisance = nuis,
+  list(est = est, dLambda = dLambda, nuisance = nuisance,
        runtime = round(Sys.time() - start_time, 2))
 }
 
@@ -559,12 +652,15 @@ causalAIPWtrunc_est = function(data, Zs, estimand, time_interest, time1_interest
 #'
 #' @return A list with components
 #' \describe{
-#'   \item{\code{est}}{Point estimates with columns \code{time} and \code{est_CIF*}
-#'     (and \code{method} when several methods are requested).}
+#'   \item{\code{est}}{Point estimates with columns \code{time} and \code{est_CIF*},
+#'     and \code{method} if \code{add_IPW}, \code{add_naive_est} or \code{name} is
+#'     given.}
 #'   \item{\code{est_se}}{Bootstrap standard errors and confidence intervals in long format
 #'     (or the raw replicates when \code{boot_raw = TRUE}); \code{NULL} if \code{n_boot = 0}.}
 #'   \item{\code{dLambda}}{Jumps of the estimated cumulative transition rates on the
-#'     observed time grid, one data frame per method.}
+#'     observed time grid, up to the largest time point in \code{time_interest} and
+#'     \code{time1_interest}, one data frame per method with columns \code{time} and
+#'     \code{dLambda<j>_<a>}.}
 #'   \item{\code{runtime}}{Runtime of the point estimation.}
 #'   \item{\code{call}}{The matched call.}
 #' }
@@ -632,6 +728,8 @@ causalAIPWtrunc = function(data, Q = 'Q', X1 = 'X1', X2 = 'X2',
     as.data.frame()
   check_trunc_data(data)
   data = data %>%
+    # Delta = 1(T < C): T = min(T1, T2) is observed, either as the non-terminal
+    # event (delta1 = 1) or as the terminal event without it (delta1 = 0, delta2 = 1)
     mutate(Delta = delta1 + (1 - delta1)*delta2,
            # status: 0=censored, 1=non-terminal event, 2=terminal event without non-terminal event
            status = ifelse(delta1 == 1, 1, 2*delta2))

@@ -140,12 +140,15 @@ and ratios.}
 \value{
 A list with components
 \describe{
-\item{\code{est}}{Point estimates with columns \code{time} and \code{est_CIF*}
-(and \code{method} when several methods are requested).}
+\item{\code{est}}{Point estimates with columns \code{time} and \code{est_CIF*},
+and \code{method} if \code{add_IPW}, \code{add_naive_est} or \code{name} is
+given.}
 \item{\code{est_se}}{Bootstrap standard errors and confidence intervals in long format
 (or the raw replicates when \code{boot_raw = TRUE}); \code{NULL} if \code{n_boot = 0}.}
 \item{\code{dLambda}}{Jumps of the estimated cumulative transition rates on the
-observed time grid, one data frame per method.}
+observed time grid, up to the largest time point in \code{time_interest} and
+\code{time1_interest}, one data frame per method with columns \code{time} and
+\code{dLambda<j>_<a>}.}
 \item{\code{runtime}}{Runtime of the point estimation.}
 \item{\code{call}}{The matched call.}
 }

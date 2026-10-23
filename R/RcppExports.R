@@ -5,7 +5,7 @@ get_integral_cpp <- function(t, X, Y) {
     .Call(`_causalDR_get_integral_cpp`, t, X, Y)
 }
 
-trunc_aug_cpp <- function(S, dL1, lp3, B3, dB3, G, dG, iQ, iX1, need_m, k_target, S_min, G_min) {
-    .Call(`_causalDR_trunc_aug_cpp`, S, dL1, lp3, B3, dB3, G, dG, iQ, iX1, need_m, k_target, S_min, G_min)
+trunc_aug_cpp <- function(S, dLambda1, lp3, B3, dB3, G, dG, index_Q, index_X1, need_m, k_target, S_min, G_min) {
+    .Call(`_causalDR_trunc_aug_cpp`, S, dLambda1, lp3, B3, dB3, G, dG, index_Q, index_X1, need_m, k_target, S_min, G_min)
 }
 
