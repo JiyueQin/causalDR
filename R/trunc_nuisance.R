@@ -104,8 +104,10 @@ breslow = function(start, stop, event, lp, weights){
   risk_score = weights*exp(lp)
   is_event = event == 1 & weights > 0
   time = sort(unique(stop[is_event]))
-  n_event = as.vector(tapply(weights[is_event], factor(stop[is_event], levels = time), sum))
-  n_event[is.na(n_event)] = 0
+  # weighted number of events at each time; match() compares the times exactly,
+  # whereas factor() would compare them as 15-digit strings and fail for times that
+  # differ only beyond that, as on the reversed time scale of fit_G()
+  n_event = as.vector(rowsum(weights[is_event], match(stop[is_event], time)))
   # sum of risk_score over {v >= s} for each s, with v = start or stop
   sum_at_or_after = function(v, s){
     o = order(v)
@@ -121,13 +123,15 @@ breslow = function(start, stop, event, lp, weights){
 #' Design matrix for the hazard models
 #'
 #' For `model = 'pCox'`, every variable other than `A` with more than 5 unique values
-#' is expanded by natural splines with 3 degrees of freedom; otherwise each variable
-#' enters linearly. The spline knots are returned, so that the same basis can be
-#' applied to new data at prediction time.
+#' is expanded by natural splines with 3 degrees of freedom. For `model = 'Cox.quad'`,
+#' a misspecified model for simulations, every variable other than `A` and `T1` enters
+#' as its square in place of the variable itself. Otherwise each variable enters
+#' linearly. The spline knots are returned, so that the same basis can be applied to
+#' new data at prediction time.
 #'
 #' @param dat Data frame containing the variables in `vars`.
 #' @param vars Character vector of covariate names.
-#' @param model Character scalar, `'Cox'` or `'pCox'`.
+#' @param model Character scalar, `'Cox'`, `'Cox.quad'` or `'pCox'`.
 #' @param basis Named list over `vars` from a previous call on the training data,
 #'   used for prediction; each element is `NULL` (linear term) or a list with the
 #'   numeric vectors `knots` and `Boundary.knots`. If `NULL`, the basis is computed
@@ -150,6 +154,12 @@ make_design = function(dat, vars, model, basis = NULL){
   }
   X_ls = map(vars, function(v){
     x = dat[[v]]
+    # misspecified model: the square of the covariate in place of the covariate
+    if (model == 'Cox.quad' && !v %in% c('A', 'T1')) {
+      out = matrix(x^2, ncol = 1)
+      colnames(out) = paste0(v, '_sq')
+      return(out)
+    }
     if (is.null(basis[[v]])) {
       out = matrix(x, ncol = 1)
     } else {
@@ -168,10 +178,11 @@ make_design = function(dat, vars, model, basis = NULL){
 
 #' Fit a (penalized) Cox model to (start, stop] data
 #'
-#' Fits a Cox model (`model = 'Cox'`) or an L2-penalized Cox model with spline terms
-#' (`model = 'pCox'`, with the treatment unpenalized and the penalty chosen by 5-fold
-#' cross-validation), and obtains the Breslow baseline cumulative hazard. Rows with
-#' zero weight are dropped.
+#' Fits a Cox model (`model = 'Cox'`), a Cox model with the squared covariates
+#' (`model = 'Cox.quad'`, misspecified, for simulations), or an L2-penalized Cox model
+#' with spline terms (`model = 'pCox'`, with the treatment unpenalized and the penalty
+#' chosen by 5-fold cross-validation), and obtains the Breslow baseline cumulative
+#' hazard. Rows with zero weight are dropped.
 #'
 #' @param dat_train Data frame containing the variables in `vars`.
 #' @param start Numeric vector of entry times, one per row of `dat_train`.
@@ -182,7 +193,7 @@ make_design = function(dat, vars, model, basis = NULL){
 #' @param weights Nonnegative numeric vector of observation weights, one per row of
 #'   `dat_train`.
 #' @param vars Character vector of covariate names.
-#' @param model Character scalar, `'Cox'` or `'pCox'`.
+#' @param model Character scalar, `'Cox'`, `'Cox.quad'` or `'pCox'`.
 #' @return A list with
 #'   * `beta`: named numeric vector of coefficients, one per column of the design
 #'     matrix (`NA` coefficients from `coxph()` are set to 0);
@@ -199,7 +210,7 @@ fit_hazard = function(dat_train, start, stop, event, weights, vars, model = 'Cox
   design = make_design(dat_train, vars, model)
   X = design$X
 
-  if (model == 'Cox') {
+  if (model %in% c('Cox', 'Cox.quad')) {
     fit = coxph(Surv(start, stop, event) ~ X, weights = weights, ties = 'breslow', timefix = F)
     beta = as.vector(fit$coefficients)
     beta[is.na(beta)] = 0
@@ -326,7 +337,7 @@ eval_S_D = function(S_D_fit, t_eval, A){
 #'   `dat_train`.
 #' @param S_D_fit List, a model fitted by `fit_S_D()`.
 #' @param Zs Character vector of covariate names.
-#' @param model Character scalar, `'Cox'` or `'pCox'`.
+#' @param model Character scalar, `'Cox'`, `'Cox.quad'` or `'pCox'`.
 #' @param tau0 Numeric scalar, the origin of the reversed time scale, larger than all
 #'   observed times.
 #' @param S_min Numeric scalar in `(0, 1)`, lower bound of `S_D` in the weights.
@@ -412,8 +423,10 @@ eval_G = function(G_fit, dat_predict, t_eval, on_grid = F){
 
 #' Estimate the propensity score
 #'
-#' Estimates `pi(Z)` by weighted logistic regression (`model = 'logit'`) or weighted
-#' gradient boosting (`model = 'gbm'`) of `A` on `Z` among the subjects with `T`
+#' Estimates `pi(Z)` by weighted logistic regression (`model = 'logit'`), weighted
+#' logistic regression on the squared covariates (`model = 'logit.quad'`,
+#' misspecified, for simulations) or weighted gradient boosting (`model = 'gbm'`) of
+#' `A` on `Z` among the subjects with `T`
 #' observed (`Delta = 1`), with the inverse probability of truncation and censoring
 #' weights `1/{G(X1 | A, Z) S_D(X1 - Q | A)}`, normalized to mean 1.
 #'
@@ -427,7 +440,7 @@ eval_G = function(G_fit, dat_predict, t_eval, on_grid = F){
 #' @param S_D_fit List, a model fitted by `fit_S_D()`.
 #' @param G_fit List, a model fitted by `fit_G()`.
 #' @param Zs Character vector of covariate names.
-#' @param model Character scalar, `'logit'` or `'gbm'`.
+#' @param model Character scalar, `'logit'`, `'logit.quad'` or `'gbm'`.
 #' @param S_min Numeric scalar in `(0, 1)`, lower bound of `S_D` in the weights.
 #' @param G_min Numeric scalar in `(0, 1)`, lower bound of `G` in the weights.
 #' @return The fitted `glm` or `gbm` object; for `gbm`, with the additional element
@@ -444,7 +457,9 @@ fit_PS = function(dat_train, weights, S_D_fit, G_fit, Zs, model, S_min, G_min){
   # sizes) on the scale of observation counts, since 1/{G S_D} >= 1 inflates them
   weights_PS = weights_PS/mean(weights_PS)
   dat = dat[, c('A', Zs), drop = F]
-  if (model == 'logit') {
+  # misspecified model: the squares of the covariates in place of the covariates
+  if (model == 'logit.quad') dat[Zs] = dat[Zs]^2
+  if (model %in% c('logit', 'logit.quad')) {
     # quasibinomial gives the same coefficients as binomial but avoids the
     # 'non-integer #successes' warning caused by the non-integer weights
     PS_fit = glm(A ~ ., data = dat, family = quasibinomial, weights = weights_PS)
@@ -471,14 +486,16 @@ fit_PS = function(dat_train, weights, S_D_fit, G_fit, Zs, model, S_min, G_min){
 #' @param PS_fit A `glm` or `gbm` object fitted by `fit_PS()`.
 #' @param dat_predict Data frame containing the covariates in `Zs`.
 #' @param Zs Character vector of covariate names.
-#' @param model Character scalar, `'logit'` or `'gbm'`, as in `fit_PS()`.
+#' @param model Character scalar, `'logit'`, `'logit.quad'` or `'gbm'`, as in
+#'   `fit_PS()`.
 #' @return A numeric vector with one propensity score per row of `dat_predict`, not
 #'   clipped.
 #' @noRd
 predict_PS_trunc = function(PS_fit, dat_predict, Zs, model){
   newdata = dat_predict[, Zs, drop = F]
+  if (model == 'logit.quad') newdata[Zs] = newdata[Zs]^2
   # type = 'response' gives P(A = 1 | Z) instead of the log-odds
-  if (model == 'logit') {
+  if (model %in% c('logit', 'logit.quad')) {
     PS = predict(PS_fit, newdata = newdata, type = 'response')
   }
   if (model == 'gbm') {
@@ -507,10 +524,12 @@ predict_PS_trunc = function(PS_fit, dat_predict, Zs, model){
 #' @param weights_train Nonnegative numeric vector of observation weights, one per row
 #'   of `dat_train`.
 #' @param Zs Character vector of covariate names.
-#' @param PS_model Character scalar, the model for `pi`: `'logit'` or `'gbm'`.
-#' @param trunc_model Character scalar, the model for `G`: `'Cox'` or `'pCox'`.
-#' @param time_model Character scalar, the model for the transition rates: `'Cox'`
+#' @param PS_model Character scalar, the model for `pi`: `'logit'`, `'logit.quad'`
+#'   or `'gbm'`.
+#' @param trunc_model Character scalar, the model for `G`: `'Cox'`, `'Cox.quad'`
 #'   or `'pCox'`.
+#' @param time_model Character scalar, the model for the transition rates: `'Cox'`,
+#'   `'Cox.quad'` or `'pCox'`.
 #' @param S_min Numeric scalar in `(0, 1)`, lower bound of `S_D` in the weights and in
 #'   the returned `S_D_*` elements.
 #' @param G_min Numeric scalar in `(0, 1)`, lower bound of `G` in the weights of
@@ -627,10 +646,12 @@ nuisance_trunc_fit_predict = function(dat_train, dat_predict, grid, weights_trai
 #' @param weights Nonnegative numeric vector of observation weights, one per row of
 #'   `data`.
 #' @param Zs Character vector of covariate names.
-#' @param PS_model Character scalar, the model for `pi`: `'logit'` or `'gbm'`.
-#' @param trunc_model Character scalar, the model for `G`: `'Cox'` or `'pCox'`.
-#' @param time_model Character scalar, the model for the transition rates: `'Cox'`
+#' @param PS_model Character scalar, the model for `pi`: `'logit'`, `'logit.quad'`
+#'   or `'gbm'`.
+#' @param trunc_model Character scalar, the model for `G`: `'Cox'`, `'Cox.quad'`
 #'   or `'pCox'`.
+#' @param time_model Character scalar, the model for the transition rates: `'Cox'`,
+#'   `'Cox.quad'` or `'pCox'`.
 #' @param crossfit Logical scalar; whether to use cross-fitting.
 #' @param k Integer scalar, the number of folds, between 2 and `n`.
 #' @param shuffle Logical scalar; if `TRUE`, the rows are shuffled before forming the

@@ -75,14 +75,20 @@ time points are used.}
 Required for \code{"CIF3"}.}
 
 \item{PS_model}{Character scalar, the propensity score model: \code{"logit"}
-(weighted logistic regression) or \code{"gbm"} (weighted gradient boosting).}
+(weighted logistic regression), \code{"logit.quad"} (weighted logistic regression
+on the squared covariates, a misspecified model for simulations) or \code{"gbm"}
+(weighted gradient boosting).}
 
 \item{trunc_model}{Character scalar, the model for the truncation distribution
-\eqn{G}: \code{"Cox"} or \code{"pCox"} (L2-penalized Cox regression with natural
-spline basis functions of the continuous covariates, tuned by cross-validation).}
+\eqn{G}: \code{"Cox"}, \code{"Cox.quad"} (Cox regression on the squared
+covariates, a misspecified model for simulations) or \code{"pCox"} (L2-penalized
+Cox regression with natural spline basis functions of the continuous covariates,
+tuned by cross-validation).}
 
 \item{time_model}{Character scalar, the model for the cumulative transition rates:
-\code{"Cox"} or \code{"pCox"}.}
+\code{"Cox"}, \code{"Cox.quad"} or \code{"pCox"}, as for \code{trunc_model}. In
+\code{"Cox.quad"}, the non-terminal event time in the model for
+\eqn{\Lambda_3} enters linearly.}
 
 \item{k}{Integer scalar, the number of folds for cross-fitting, between 2 and
 \code{nrow(data)}.}

@@ -206,3 +206,40 @@ test_that('dLambda_trunc rejects nuisance estimates on a different grid or data'
   expect_error(run(g = grid[-1]), 'grid must contain')
   expect_error(run(d = dat[-1, ]), 'do not match')
 })
+
+test_that('the misspecified models use the squared covariates', {
+  dat = data.frame(A = c(0, 1, 1, 0), Z1 = c(-1, 2, 0.5, 3), T1 = c(1, 2, 3, 4))
+  X = make_design(dat, c('A', 'Z1', 'T1'), 'Cox.quad')$X
+  # Z1 is squared, A and T1 enter linearly; 'var' keeps the variable names
+  expect_equal(unname(X[, 2]), dat$Z1^2)
+  expect_equal(unname(X[, 1]), dat$A)
+  expect_equal(unname(X[, 3]), dat$T1)
+  expect_equal(attr(X, 'var'), c('A', 'Z1', 'T1'))
+
+  set.seed(8)
+  sim = sim_data_trunc(n = 200)$dat
+  for (model in c('logit.quad', 'Cox.quad')) {
+    args = list(covars = c('Z1', 'Z2'), time_interest = c(2, 3), time1_interest = 1.5,
+                add_IPW = TRUE, n_boot = 0)
+    if (model == 'logit.quad') args$PS_model = model
+    else args[c('trunc_model', 'time_model')] = model
+    fit = expect_no_error(do.call(causalAIPWtrunc, c(list(sim), args)))
+    CIF = as.matrix(fit$est[, -(1:2)])
+    expect_true(all(CIF >= 0 & CIF <= 1))
+  }
+  # other model names are still rejected
+  expect_error(causalAIPWtrunc(sim, covars = c('Z1', 'Z2'), PS_model = 'logit.cube',
+                               time1_interest = 1.5, n_boot = 0), 'PS_model')
+})
+
+test_that('breslow handles event times that differ only beyond 15 digits', {
+  # as.character() maps both stop times to '1', which once gave duplicated factor
+  # levels; such times arise on the reversed time scale tau0 - Q of fit_G()
+  stop = c(1, 1 + 4e-16, 2, 3)
+  expect_true(length(unique(stop)) == 4 && as.character(stop[1]) == as.character(stop[2]))
+  bh = breslow(start = rep(0, 4), stop = stop, event = c(1, 1, 1, 0), lp = rep(0, 4),
+               weights = rep(1, 4))
+  # risk sets 4, 3, 2 at the three distinct event times
+  expect_equal(bh$time, stop[1:3])
+  expect_equal(bh$jump, c(1/4, 1/3, 1/2))
+})

@@ -470,9 +470,9 @@ check_trunc_data = function(data){
 #'   all observed time points.
 #' @param time1_interest Numeric vector of non-terminal event times, sorted, or `NULL`
 #'   if `CIF3` is not requested.
-#' @param PS_model Character scalar, `'logit'` or `'gbm'`.
-#' @param trunc_model Character scalar, `'Cox'` or `'pCox'`.
-#' @param time_model Character scalar, `'Cox'` or `'pCox'`.
+#' @param PS_model Character scalar, `'logit'`, `'logit.quad'` or `'gbm'`.
+#' @param trunc_model Character scalar, `'Cox'`, `'Cox.quad'` or `'pCox'`.
+#' @param time_model Character scalar, `'Cox'`, `'Cox.quad'` or `'pCox'`.
 #' @param crossfit Logical scalar; if `TRUE`, the nuisance models are cross-fitted. The
 #'   option `crossfit = 'auto'` of `causalAIPWtrunc()` is converted to a logical
 #'   before this function is called: `TRUE` if any nuisance model is `'gbm'` or
@@ -609,12 +609,18 @@ causalAIPWtrunc_est = function(data, Zs, estimand, time_interest, time1_interest
 #' @param time1_interest Numeric vector of non-terminal event times to condition on.
 #'   Required for \code{"CIF3"}.
 #' @param PS_model Character scalar, the propensity score model: \code{"logit"}
-#'   (weighted logistic regression) or \code{"gbm"} (weighted gradient boosting).
+#'   (weighted logistic regression), \code{"logit.quad"} (weighted logistic regression
+#'   on the squared covariates, a misspecified model for simulations) or \code{"gbm"}
+#'   (weighted gradient boosting).
 #' @param trunc_model Character scalar, the model for the truncation distribution
-#'   \eqn{G}: \code{"Cox"} or \code{"pCox"} (L2-penalized Cox regression with natural
-#'   spline basis functions of the continuous covariates, tuned by cross-validation).
+#'   \eqn{G}: \code{"Cox"}, \code{"Cox.quad"} (Cox regression on the squared
+#'   covariates, a misspecified model for simulations) or \code{"pCox"} (L2-penalized
+#'   Cox regression with natural spline basis functions of the continuous covariates,
+#'   tuned by cross-validation).
 #' @param time_model Character scalar, the model for the cumulative transition rates:
-#'   \code{"Cox"} or \code{"pCox"}.
+#'   \code{"Cox"}, \code{"Cox.quad"} or \code{"pCox"}, as for \code{trunc_model}. In
+#'   \code{"Cox.quad"}, the non-terminal event time in the model for
+#'   \eqn{\Lambda_3} enters linearly.
 #' @param k Integer scalar, the number of folds for cross-fitting, between 2 and
 #'   \code{nrow(data)}.
 #' @param crossfit Logical scalar or \code{"auto"} (default). \code{"auto"} cross-fits
@@ -694,9 +700,9 @@ causalAIPWtrunc = function(data, Q = 'Q', X1 = 'X1', X2 = 'X2',
       stop(arg, ' should be one of the following: ', paste(choices, collapse = ', '))
     }
   }
-  check_option(PS_model, 'PS_model', c('logit', 'gbm'))
-  check_option(trunc_model, 'trunc_model', c('Cox', 'pCox'))
-  check_option(time_model, 'time_model', c('Cox', 'pCox'))
+  check_option(PS_model, 'PS_model', c('logit', 'logit.quad', 'gbm'))
+  check_option(trunc_model, 'trunc_model', c('Cox', 'Cox.quad', 'pCox'))
+  check_option(time_model, 'time_model', c('Cox', 'Cox.quad', 'pCox'))
   if (any(!estimand %in% c('all', 'CIF1', 'CIF2', 'CIF3'))) {
     stop('The estimand should be one or some of the following: all, CIF1, CIF2, CIF3')
   }
